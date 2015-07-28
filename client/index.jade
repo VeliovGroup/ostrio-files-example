@@ -1,0 +1,181 @@
+template(name="index")
+  .container
+    .row
+      .col-md-12
+        +markdown
+          ## Hello, this is example app of [`ostrio:files`](https://atmospherejs.com/ostrio/files) package
+          To start - in console go to your project's folder and run:
+          ```shell
+          meteor add ostrio:files
+          ```
+
+    .row
+      .col-md-12
+        +markdown
+          ### new Meteor.Files([config])
+          Let's create our first `Files` collection by adding code below into `lib` folder. `lib` folder is not actually required it just should be file avaliable for server and client, other words - isomorphic.
+          We will store all our collestions in global `@Collections` object.
+
+          ```coffeescript
+          # /lib/compatibility/Collections.coffee
+          @Collections = {}
+          ```
+
+          ```coffeescript
+          # /lib/files.collection.coffee
+          Collections.defaultFilesCollection = new Meteor.Files()
+          ```
+          __Note__: By default this package tries to write files into `/assets` directory of your server (inside very root folder), make sure it writable!
+          Now go to browser's console and type: `Collections.defaultFilesCollection`, you will see what by default collection was created with name `MeteorUploadFiles`, has `/cdn/storage` as download route and many other properties, get into them.
+
+    hr
+
+    .row
+      .col-md-12
+        +markdown
+          ### Upload files
+          To upload files we will use `insert()` method.
+      .col-md-6
+        +markdown
+          ```coffeescript
+          # /client/index.coffee
+          # Create reactive variable to hold upload state
+          defaultUploadState = new ReactiveVar false
+          Template.index.events
+            'change #defaultUpload': (e, template) ->
+              _.each e.currentTarget.files, (file) ->
+                Collections.defaultFilesCollection.insert 
+                  file: file
+                  meta: {}
+                  storagePath: 'assets/' #write ro folder where script is executing, note: this folder will be removed after application updates or refresh
+                  onUploaded: (error, fileObj) ->
+                    throw new Meteor.Error 500, error if error
+
+                    # Unbind previously uploaded file from `file` input
+                    template.$(e.target).val ''
+                    template.$(e.currentTarget).val ''
+
+                    # Show uploaded file link
+                    defaultUploadState.set fileObj
+
+          Template.index.helpers
+            defaultUploadState: ->
+              defaultUploadState.get()
+          ```
+
+      .col-md-6
+        +markdown
+          Now we need to create file input in our template and condition to show download link to our file, if file is uploaded
+          ```jade
+          # /client/index.jade
+          unless defaultUploadState
+            input#defaultUpload(type="file")
+          else
+            a(href="⎨⎨fileURL defaultUploadState⎬⎬?download=true") #⎨defaultUploadState.name⎬
+          ```
+        unless defaultUploadState
+          input#defaultUpload(type="file")
+        else
+          a(href="{{fileURL defaultUploadState}}?download=true") #{defaultUploadState.name}
+
+
+    hr
+
+    .row
+      .col-md-12
+        +markdown
+          ### Upload files with progress bar and limitations
+          In previous example we've uploaded files without any limitations on file size or file type, and doesn't show any progress while file was uploading, let's create new collection with some limitations - where you can upload only images with file size less or equal to 10MB.
+
+      .col-md-6
+        +markdown
+          ```coffeescript
+          # /lib/files.collection.coffee
+          Collections.images = new Meteor.Files
+            collectionName: 'Images'
+            onBeforeUpload: ->
+              allowedExt = ['jpeg', 'jpg', 'png', 'gif']
+              true if allowedExt.inArray(@ext) and @size < 10 * 1024 * 1024
+            debug: true # Let's see some stats - monitor browser's and server's console
+          ```
+
+          ```coffeescript
+          # /client/index.coffee
+          imageUploadState = new ReactiveVar false
+          imageUploadError = new ReactiveVar false
+          imageUploadProgress = new ReactiveVar false
+
+          Template.index.events
+            'change #imageUpload': (e, template) ->
+              imageUploadError.set false
+              _.each e.currentTarget.files, (file) ->
+                done = false
+                imageUploadProgress.set 0
+                Collections.images.insert
+                  file: file
+                  meta: {}
+                  onUploaded: (error, fileObj) ->
+                    if error
+                      imageUploadError.set error
+                      throw new Meteor.Error 400, error
+
+                    # Unbind previously uploaded file from `file` input
+                    template.$(e.target).val ''
+                    template.$(e.currentTarget).val ''
+
+                    # Show uploaded image
+                    imageUploadProgress.set false
+                    imageUploadState.set fileObj
+                  onBeforeUpload: ->
+                    allowedExt = ['jpeg', 'jpg', 'png', 'gif']
+                    if allowedExt.inArray(@ext) and @size < 10 * 1024 * 1024
+                      true
+                    else
+                      "Please upload file in next formats: #{allowedExt.join(', ')} with size less than 10 Mb. You have tried to upload file with \"#{@ext}\" extension and with \"#{Math.round((@size/(1024*1024)) * 100) / 100}\" MB"
+                  onProgress: (progress) ->
+                    if not done
+                      imageUploadProgress.set progress
+                    else
+                      imageUploadProgress.set false
+          ```
+      .col-md-6
+        +markdown
+          Let's create file input, upload progress bar error handler and uploaded image holder
+          ```coffeescript
+          # /client/index.coffee
+          Template.index.helpers
+            imageUploadProgress: ->
+              imageUploadProgress.get()
+            imageUploadError: ->
+              imageUploadError.get()
+            imageUploadState: ->
+              imageUploadState.get()
+          ```
+
+          ```jade
+          # /client/index.jade
+          unless compare imageUploadProgress 'and' imageUploadState
+            input#imageUpload(type="file")
+          else if imageUploadProgress
+            .progress
+              .progress-bar.progress-bar-striped.active(style="width:⎨⎨imageUploadProgress⎬⎬%")
+                span #⎨imageUploadProgress⎬%
+          else if imageUploadState
+            img.img-responsive(src="⎨⎨fileURL imageUploadState⎬⎬" title="⎨⎨imageUploadState.name⎬⎬")
+
+          if imageUploadError
+            div.alert.alert-danger #⎨imageUploadError⎬
+          ```
+
+        if compare imageUploadProgress 'nor' imageUploadState
+          input#imageUpload(type="file")
+        else if imageUploadProgress
+          .progress
+            .progress-bar.progress-bar-striped.active(style="width:{{imageUploadProgress}}%")
+              span #{imageUploadProgress}%
+        else if imageUploadState
+          img.img-responsive(src="{{fileURL imageUploadState}}" title="{{imageUploadState.name}}")
+
+        if imageUploadError
+          div.alert.alert-danger #{imageUploadError}
+        
